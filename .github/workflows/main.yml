@@ -9,15 +9,16 @@ on:
 
 jobs:
   build:
-    name: Build Release APK
+    name: Build Almona
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Extract project
         run: |
+          rm -rf project
           mkdir -p project
           unzip -q almona.zip -d project
 
@@ -25,16 +26,16 @@ jobs:
         id: project
         shell: bash
         run: |
-          PUBSPEC=$(find project -name pubspec.yaml -type f | head -n 1)
+          PUBSPEC=$(find project -type f -name pubspec.yaml | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "pubspec.yaml not found"
+            echo "ERROR: pubspec.yaml not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Found Flutter project:"
+          echo "Flutter project found at:"
           echo "$PROJECT_DIR"
 
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
@@ -46,50 +47,119 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Flutter version
-        run: flutter --version
+      - name: Check Flutter
+        run: |
+          flutter --version
+          flutter doctor -v
 
-      - name: Enable desugaring
+      - name: Fix Android configuration
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
 
-          path = Path("android/app/build.gradle.kts")
+          app = Path("android/app/build.gradle.kts")
+          settings = Path("android/settings.gradle.kts")
 
-          if not path.exists():
-              raise SystemExit("build.gradle.kts not found")
+          if not app.exists():
+              raise SystemExit("android/app/build.gradle.kts not found")
 
-          text = path.read_text()
+          if not settings.exists():
+              raise SystemExit("android/settings.gradle.kts not found")
+
+          # --------------------------------------------------
+          # 1. Enable core library desugaring
+          # --------------------------------------------------
+
+          text = app.read_text()
 
           if "isCoreLibraryDesugaringEnabled" not in text:
-              text = text.replace(
-                  "compileOptions {",
-                  "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
-                  1
+              pattern = r"(compileOptions\s*\{)"
+              replacement = (
+                  r"\1\n"
+                  r"        isCoreLibraryDesugaringEnabled = true"
               )
+
+              text, count = re.subn(
+                  pattern,
+                  replacement,
+                  text,
+                  count=1
+              )
+
+              if count == 0:
+                  raise SystemExit(
+                      "compileOptions block was not found"
+                  )
+
+          # --------------------------------------------------
+          # 2. Add desugaring dependency
+          # --------------------------------------------------
 
           if "coreLibraryDesugaring(" not in text:
-              text = text.replace(
-                  "dependencies {",
-                  """dependencies {
-              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")""",
-                  1
-              )
+              dependency = """
+dependencies {
+    coreLibraryDesugaring(
+        "com.android.tools:desugar_jdk_libs:2.1.5"
+    )
+}
+"""
 
-          path.write_text(text)
+              text = text.rstrip() + "\n" + dependency
+
+          app.write_text(text)
+
+          # --------------------------------------------------
+          # 3. Upgrade Kotlin
+          # --------------------------------------------------
+
+          settings_text = settings.read_text()
+
+          settings_text = re.sub(
+              r'(id\("org\.jetbrains\.kotlin\.android"\)\s+version\s+")[^"]+(")',
+              r'\g<1>2.1.20\g<2>',
+              settings_text
+          )
+
+          settings.write_text(settings_text)
+
+          print("Android configuration updated successfully.")
+          print()
+          print("===== build.gradle.kts =====")
+          print(app.read_text())
+          print()
+          print("===== settings.gradle.kts =====")
+          print(settings.read_text())
           PY
 
-      - name: Get packages
+      - name: Get dependencies
         working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter pub get
+        run: |
+          flutter clean
+          flutter pub get
 
-      - name: Build APK
+      - name: Build release APK
         working-directory: ${{ steps.project.outputs.dir }}
-        run: flutter build apk --release
+        run: |
+          flutter build apk --release
 
-      - name: Prepare APK
+      - name: Verify APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not created."
+            exit 1
+          fi
+
+          echo "APK successfully created:"
+          ls -lh "$APK"
+
+      - name: Prepare Almona APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           mkdir -p output
@@ -100,3 +170,4 @@ jobs:
         with:
           name: Almona-APK
           path: ${{ steps.project.outputs.dir }}/output/Almona.apk
+          if-no-files-found: error
