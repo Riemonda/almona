@@ -5,7 +5,7 @@ on:
   push:
     paths:
       - "almona.zip"
-      - ".github/workflows/build.yml"
+      - ".github/workflows/main.yml"
 
 jobs:
   build:
@@ -13,153 +13,90 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract Almona project
+      - name: Extract project
         run: |
-          rm -rf project
           mkdir -p project
           unzip -q almona.zip -d project
 
-          echo "Project contents:"
-          find project -maxdepth 3 -type f | head -100
-
       - name: Find Flutter project
-        id: find_project
+        id: project
+        shell: bash
         run: |
-          PUBSPEC=$(find project -name pubspec.yaml -type f | head -1)
+          PUBSPEC=$(find project -name pubspec.yaml -type f | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml was not found inside almona.zip"
+            echo "pubspec.yaml not found"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter project:"
+          echo "Found Flutter project:"
           echo "$PROJECT_DIR"
 
-          echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Flutter
+      - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
           flutter-version: "3.41.7"
           channel: stable
           cache: true
 
-      - name: Show Flutter version
+      - name: Flutter version
         run: flutter --version
 
-      - name: Enable core library desugaring
-        working-directory: ${{ steps.find_project.outputs.project_dir }}
+      - name: Enable desugaring
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
-          python3 - <<'PY'
+          python3 <<'PY'
           from pathlib import Path
 
           path = Path("android/app/build.gradle.kts")
 
           if not path.exists():
-              raise SystemExit(
-                  "ERROR: android/app/build.gradle.kts was not found"
-              )
+              raise SystemExit("build.gradle.kts not found")
 
           text = path.read_text()
 
-          # Enable core library desugaring
           if "isCoreLibraryDesugaringEnabled" not in text:
+              text = text.replace(
+                  "compileOptions {",
+                  "compileOptions {\n        isCoreLibraryDesugaringEnabled = true",
+                  1
+              )
 
-              if "compileOptions {" in text:
-                  start = text.index("compileOptions {")
-
-                  depth = 0
-                  end = None
-
-                  for i in range(start, len(text)):
-                      if text[i] == "{":
-                          depth += 1
-                      elif text[i] == "}":
-                          depth -= 1
-                          if depth == 0:
-                              end = i + 1
-                              break
-
-                  if end is None:
-                      raise SystemExit(
-                          "ERROR: Could not parse compileOptions block"
-                      )
-
-                  block = text[start:end]
-
-                  block = block.replace(
-                      "{",
-                      "{\n        isCoreLibraryDesugaringEnabled = true",
-                      1
-                  )
-
-                  text = text[:start] + block + text[end:]
-
-              else:
-                  raise SystemExit(
-                      "ERROR: compileOptions block was not found"
-                  )
-
-          # Add desugaring dependency
           if "coreLibraryDesugaring(" not in text:
-
-              if "dependencies {" in text:
-                  text = text.replace(
-                      "dependencies {",
-                      """dependencies {
-    coreLibraryDesugaring(
-        "com.android.tools:desugar_jdk_libs:2.1.5"
-    )""",
-                      1
-                  )
-              else:
-                  text += """
-
-dependencies {
-    coreLibraryDesugaring(
-        "com.android.tools:desugar_jdk_libs:2.1.5"
-    )
-}
-"""
+              text = text.replace(
+                  "dependencies {",
+                  """dependencies {
+              coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")""",
+                  1
+              )
 
           path.write_text(text)
-
-          print("Updated android/app/build.gradle.kts:")
-          print("=" * 60)
-          print(text)
-          print("=" * 60)
           PY
 
-      - name: Get dependencies
-        working-directory: ${{ steps.find_project.outputs.project_dir }}
+      - name: Get packages
+        working-directory: ${{ steps.project.outputs.dir }}
         run: flutter pub get
 
-      - name: Analyze project
-        working-directory: ${{ steps.find_project.outputs.project_dir }}
-        run: flutter analyze
-        continue-on-error: true
-
-      - name: Build release APK
-        working-directory: ${{ steps.find_project.outputs.project_dir }}
+      - name: Build APK
+        working-directory: ${{ steps.project.outputs.dir }}
         run: flutter build apk --release
 
       - name: Prepare APK
-        working-directory: ${{ steps.find_project.outputs.project_dir }}
+        working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          mkdir -p build/apk
-          cp build/app/outputs/flutter-apk/app-release.apk build/apk/Almona.apk
-
-          echo "APK created successfully:"
-          ls -lh build/apk/Almona.apk
+          mkdir -p output
+          cp build/app/outputs/flutter-apk/app-release.apk output/Almona.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Almona-APK
-          path: ${{ steps.find_project.outputs.project_dir }}/build/apk/Almona.apk
-          if-no-files-found: error
+          path: ${{ steps.project.outputs.dir }}/output/Almona.apk
