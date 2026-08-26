@@ -1,1 +1,97 @@
+name: Build Almona APK
 
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "almona.zip"
+      - ".github/workflows/main.yml"
+
+jobs:
+  build:
+    name: Build Almona
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project
+        run: |
+          rm -rf project
+          mkdir -p project
+          unzip -q almona.zip -d project
+
+      - name: Find Flutter project
+        id: project
+        shell: bash
+        run: |
+          PUBSPEC=$(find project -type f -name pubspec.yaml | head -n 1)
+
+          if [ -z "$PUBSPEC" ]; then
+            echo "ERROR: pubspec.yaml not found"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PUBSPEC")
+
+          echo "Flutter project: $PROJECT_DIR"
+          echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.7"
+          channel: stable
+          cache: true
+
+      - name: Configure Android
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          APP="android/app/build.gradle.kts"
+          SETTINGS="android/settings.gradle.kts"
+
+          echo "Configuring Android..."
+
+          if ! grep -q "isCoreLibraryDesugaringEnabled" "$APP"; then
+            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$APP"
+          fi
+
+          if ! grep -q "coreLibraryDesugaring(" "$APP"; then
+            printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n' >> "$APP"
+          fi
+
+          sed -i 's/id("org.jetbrains.kotlin.android") version "1.8.22"/id("org.jetbrains.kotlin.android") version "2.1.20"/' "$SETTINGS"
+
+          echo "Android configuration completed."
+
+      - name: Get dependencies
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter clean
+          flutter pub get
+
+      - name: Build APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter build apk --release
+
+      - name: Verify APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          test -f build/app/outputs/flutter-apk/app-release.apk
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Prepare APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          mkdir -p output
+          cp build/app/outputs/flutter-apk/app-release.apk output/Almona.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Almona-APK
+          path: ${{ steps.project.outputs.dir }}/output/Almona.apk
+          if-no-files-found: error
