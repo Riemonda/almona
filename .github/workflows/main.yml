@@ -3,18 +3,19 @@ name: Build Almona APK
 on:
   workflow_dispatch:
   push:
-    branches: [ main ]
+    branches:
+      - main
 
 jobs:
   build:
-    name: Build Almona
+    name: Build Almona APK
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Extract project
+      - name: Extract Flutter project
         run: |
           rm -rf project
           mkdir -p project
@@ -24,7 +25,7 @@ jobs:
         id: project
         shell: bash
         run: |
-          PUBSPEC=$(find project -type f -name pubspec.yaml | head -n 1)
+          PUBSPEC=$(find project -type f -name "pubspec.yaml" | head -n 1)
 
           if [ -z "$PUBSPEC" ]; then
             echo "ERROR: pubspec.yaml not found"
@@ -33,242 +34,81 @@ jobs:
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter project: $PROJECT_DIR"
+          echo "Flutter project found at: $PROJECT_DIR"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
 
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.0"
+          flutter-version: "3.29.3"
           channel: stable
           cache: true
 
-      - name: Fix pubspec.yaml and create icon
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK 35
+        run: |
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-35"
+          sdkmanager "build-tools;35.0.0"
+
+      - name: Accept Android licenses
+        run: |
+          yes | sdkmanager --licenses || true
+
+      - name: Configure Android SDK 35
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          # إصلاح intl
-          sed -i 's/intl: \^0.20.2/intl: \^0.19.0/g' pubspec.yaml
-          
-          # إضافة flutter_launcher_icons
-          if ! grep -q "flutter_launcher_icons" pubspec.yaml; then
-            sed -i '/dev_dependencies:/a\  flutter_launcher_icons: ^0.13.1' pubspec.yaml
-          fi
-          
-          # إضافة إعدادات الأيقونة
-          cat >> pubspec.yaml << 'EOF'
+          python3 - <<'PY'
+          from pathlib import Path
 
-          flutter_launcher_icons:
-            android: true
-            ios: true
-            image_path: "assets/icon/icon.png"
-            adaptive_icon_background: "#4CAF50"
-            adaptive_icon_foreground: "assets/icon/icon.png"
-          EOF
-          
-          mkdir -p assets/icon
-          
-          # تحميل أيقونة صالحة من الإنترنت
-          curl -L -o assets/icon/icon.png https://cdn-icons-png.flaticon.com/512/25/25231.png
-          
-          echo "✅ Fixed pubspec.yaml and downloaded icon"
+          path = Path("android/app/build.gradle.kts")
+          text = path.read_text()
 
-      - name: Generate app icon
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          flutter pub get
-          flutter pub run flutter_launcher_icons || echo "Icon generation warning, continuing..."
+          text = text.replace(
+              "compileSdk = flutter.compileSdkVersion",
+              "compileSdk = 35"
+          )
 
-      - name: Generate Keystore
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          keytool -genkey -v -keystore release.keystore \
-            -alias almona \
-            -keyalg RSA -keysize 2048 -validity 10000 \
-            -storepass almona123 \
-            -keypass almona123 \
-            -dname "CN=Almona App, OU=Almona, O=Almona, L=Unknown, ST=Unknown, C=Unknown"
-          echo "✅ Generated keystore"
+          path.write_text(text)
+          PY
 
-      - name: Create Android files
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          # حذف أي ملفات Gradle قديمة
-          rm -f android/app/build.gradle.kts
-          rm -f android/build.gradle.kts
-          rm -f android/settings.gradle.kts
-          
-          # إنشاء android/build.gradle
-          cat > android/build.gradle << 'EOF'
-          buildscript {
-              ext.kotlin_version = '1.9.22'
-              repositories {
-                  google()
-                  mavenCentral()
-              }
+          echo "Android compileSdk configured to 35"
 
-              dependencies {
-                  classpath 'com.android.tools.build:gradle:8.1.0'
-                  classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
-              }
-          }
-
-          allprojects {
-              repositories {
-                  google()
-                  mavenCentral()
-              }
-          }
-
-          rootProject.buildDir = '../build'
-          subprojects {
-              project.buildDir = "${rootProject.buildDir}/${project.name}"
-          }
-          subprojects {
-              project.evaluationDependsOn(':app')
-          }
-
-          tasks.register("clean", Delete) {
-              delete rootProject.buildDir
-          }
-          EOF
-
-          # إنشاء android/app/build.gradle
-          cat > android/app/build.gradle << 'EOF'
-          plugins {
-              id "com.android.application"
-              id "kotlin-android"
-              id "dev.flutter.flutter-gradle-plugin"
-          }
-
-          def localProperties = new Properties()
-          def localPropertiesFile = rootProject.file('local.properties')
-          if (localPropertiesFile.exists()) {
-              localPropertiesFile.withReader('UTF-8') { reader ->
-                  localProperties.load(reader)
-              }
-          }
-
-          def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
-          if (flutterVersionCode == null) {
-              flutterVersionCode = '1'
-          }
-
-          def flutterVersionName = localProperties.getProperty('flutter.versionName')
-          if (flutterVersionName == null) {
-              flutterVersionName = '1.0'
-          }
-
-          def keystoreProperties = new Properties()
-          def keystorePropertiesFile = rootProject.file('key.properties')
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
-          }
-
-          android {
-              namespace = "com.example.almona"
-              ndkVersion = "27.0.12077973"
-              compileSdk = 34
-
-              compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_17
-                  targetCompatibility = JavaVersion.VERSION_17
-              }
-
-              kotlinOptions {
-                  jvmTarget = '17'
-              }
-
-              sourceSets {
-                  main.java.srcDirs += 'src/main/kotlin'
-              }
-
-              defaultConfig {
-                  applicationId = "com.example.almona"
-                  minSdk = 21
-                  targetSdk = 34
-                  versionCode = flutterVersionCode.toInteger()
-                  versionName = flutterVersionName
-                  multiDexEnabled = true
-              }
-
-              signingConfigs {
-                  release {
-                      keyAlias = keystoreProperties['keyAlias']
-                      keyPassword = keystoreProperties['keyPassword']
-                      storeFile = keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
-                      storePassword = keystoreProperties['storePassword']
-                  }
-              }
-
-              buildTypes {
-                  release {
-                      signingConfig = signingConfigs.release
-                  }
-              }
-          }
-
-          flutter {
-              source = "../.."
-          }
-
-          dependencies {
-              coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
-          }
-          EOF
-
-          # إنشاء android/key.properties
-          cat > android/key.properties << 'EOF'
-          storePassword=almona123
-          keyPassword=almona123
-          keyAlias=almona
-          storeFile=../release.keystore
-          EOF
-
-          # إنشاء android/settings.gradle
-          cat > android/settings.gradle << 'EOF'
-          pluginManagement {
-              def flutterSdkPath = {
-                  def properties = new Properties()
-                  file("local.properties").withInputStream { properties.load(it) }
-                  def flutterSdkPath = properties.getProperty("flutter.sdk")
-                  assert flutterSdkPath != null, "flutter.sdk not set in local.properties"
-                  return flutterSdkPath
-              }
-              settings.ext.flutterSdkPath = flutterSdkPath()
-
-              includeBuild("${settings.ext.flutterSdkPath}/packages/flutter_tools/gradle")
-
-              repositories {
-                  google()
-                  mavenCentral()
-                  gradlePluginPortal()
-              }
-          }
-
-          plugins {
-              id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-              id "com.android.application" version "8.1.0" apply false
-              id "org.jetbrains.kotlin.android" version "1.9.22" apply false
-          }
-
-          include ":app"
-          EOF
-
-          # إنشاء android/gradle.properties
-          cat > android/gradle.properties << 'EOF'
-          org.gradle.jvmargs=-Xmx4G
-          android.useAndroidX=true
-          android.enableJetifier=true
-          EOF
-
-          echo "✅ Created Android files"
-
-      - name: Build APK
+      - name: Flutter clean
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter clean
+
+      - name: Get dependencies
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
           flutter pub get
+
+      - name: Build release APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
           flutter build apk --release
+
+      - name: Verify APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+
+          if [ ! -f "$APK" ]; then
+            echo "ERROR: APK was not created"
+            exit 1
+          fi
+
+          echo "APK successfully created:"
+          ls -lh "$APK"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -276,3 +116,4 @@ jobs:
           name: Almona-APK
           path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
+          retention-days: 30
