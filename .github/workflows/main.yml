@@ -52,22 +52,20 @@ jobs:
       - name: Fix Android build files
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          # حذف ملفات build.gradle.kts القديمة
           rm -f android/app/build.gradle.kts
           rm -f android/build.gradle.kts
           rm -f android/settings.gradle.kts
           
-          # إنشاء android/build.gradle
           cat > android/build.gradle << 'EOF'
           buildscript {
-              ext.kotlin_version = '1.9.0'
+              ext.kotlin_version = '1.9.22'
               repositories {
                   google()
                   mavenCentral()
               }
 
               dependencies {
-                  classpath 'com.android.tools.build:gradle:7.3.1'
+                  classpath 'com.android.tools.build:gradle:8.1.0'
                   classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
               }
           }
@@ -92,7 +90,6 @@ jobs:
           }
           EOF
 
-          # إنشاء android/app/build.gradle
           cat > android/app/build.gradle << 'EOF'
           plugins {
               id "com.android.application"
@@ -119,17 +116,17 @@ jobs:
           }
 
           android {
-              namespace = "com.example.almona"  // ✅ تمت الإضافة
+              namespace = "com.example.almona"
               ndkVersion = "27.0.12077973"
-              compileSdk = 35  // ✅ تم التغيير من 34 إلى 35
+              compileSdk = 34
 
               compileOptions {
-                  sourceCompatibility = JavaVersion.VERSION_1_8
-                  targetCompatibility = JavaVersion.VERSION_1_8
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
               }
 
               kotlinOptions {
-                  jvmTarget = '1.8'
+                  jvmTarget = '17'
               }
 
               sourceSets {
@@ -139,7 +136,7 @@ jobs:
               defaultConfig {
                   applicationId = "com.example.almona"
                   minSdk = 21
-                  targetSdk = 35  // ✅ تم التغيير من 34 إلى 35
+                  targetSdk = 34
                   versionCode = flutterVersionCode.toInteger()
                   versionName = flutterVersionName
                   multiDexEnabled = true
@@ -161,7 +158,6 @@ jobs:
           }
           EOF
 
-          # إنشاء android/settings.gradle
           cat > android/settings.gradle << 'EOF'
           pluginManagement {
               def flutterSdkPath = {
@@ -184,14 +180,13 @@ jobs:
 
           plugins {
               id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-              id "com.android.application" version "7.3.1" apply false  // ✅ تم التحديث
-              id "org.jetbrains.kotlin.android" version "1.9.0" apply false
+              id "com.android.application" version "8.1.0" apply false
+              id "org.jetbrains.kotlin.android" version "1.9.22" apply false
           }
 
           include ":app"
           EOF
 
-          # إنشاء android/gradle.properties
           cat > android/gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4G
           android.useAndroidX=true
@@ -199,8 +194,6 @@ jobs:
           EOF
 
           echo "✅ Android build files fixed"
-          
-          # عرض الملفات للتأكد
           ls -la android/
 
       - name: Get dependencies
@@ -212,17 +205,17 @@ jobs:
       - name: Build APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          flutter build apk --release
+          flutter build apk --debug  # ✅ تم التغيير إلى debug
 
       - name: Verify APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          test -f build/app/outputs/flutter-apk/app-release.apk
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
+          test -f build/app/outputs/flutter-apk/app-debug.apk
+          ls -lh build/app/outputs/flutter-apk/app-debug.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Almona-APK
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
+          name: Almona-APK-Debug
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-debug.apk
           if-no-files-found: error
