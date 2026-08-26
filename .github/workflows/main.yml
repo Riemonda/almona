@@ -55,6 +55,7 @@ jobs:
           # حذف ملفات build.gradle.kts القديمة
           rm -f android/app/build.gradle.kts
           rm -f android/build.gradle.kts
+          rm -f android/settings.gradle.kts
           
           # إنشاء android/build.gradle
           cat > android/build.gradle << 'EOF'
@@ -66,7 +67,7 @@ jobs:
               }
 
               dependencies {
-                  classpath 'com.android.tools.build:gradle:7.3.0'
+                  classpath 'com.android.tools.build:gradle:7.3.1'
                   classpath "org.jetbrains.kotlin:kotlin-gradle-plugin:$kotlin_version"
               }
           }
@@ -118,8 +119,9 @@ jobs:
           }
 
           android {
+              namespace = "com.example.almona"  // ✅ تمت الإضافة
               ndkVersion = "27.0.12077973"
-              compileSdk = 34
+              compileSdk = 35  // ✅ تم التغيير من 34 إلى 35
 
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_1_8
@@ -137,7 +139,7 @@ jobs:
               defaultConfig {
                   applicationId = "com.example.almona"
                   minSdk = 21
-                  targetSdk = 34
+                  targetSdk = 35  // ✅ تم التغيير من 34 إلى 35
                   versionCode = flutterVersionCode.toInteger()
                   versionName = flutterVersionName
                   multiDexEnabled = true
@@ -182,7 +184,7 @@ jobs:
 
           plugins {
               id "dev.flutter.flutter-plugin-loader" version "1.0.0"
-              id "com.android.application" version "7.3.0" apply false
+              id "com.android.application" version "7.3.1" apply false  // ✅ تم التحديث
               id "org.jetbrains.kotlin.android" version "1.9.0" apply false
           }
 
