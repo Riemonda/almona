@@ -43,12 +43,16 @@ jobs:
           distribution: temurin
           java-version: "17"
 
-      - name: Setup Flutter
+      - name: Setup Flutter 3.41.7
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.3"
+          flutter-version: "3.41.7"
           channel: stable
           cache: true
+
+      - name: Show Flutter version
+        run: |
+          flutter --version
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
@@ -63,24 +67,28 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
-      - name: Configure Android SDK 35
+      - name: Configure compileSdk 35
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("android/app/build.gradle.kts")
-          text = path.read_text()
 
-          text = text.replace(
-              "compileSdk = flutter.compileSdkVersion",
-              "compileSdk = 35"
-          )
+          if path.exists():
+              text = path.read_text()
 
-          path.write_text(text)
+              text = text.replace(
+                  "compileSdk = flutter.compileSdkVersion",
+                  "compileSdk = 35"
+              )
+
+              path.write_text(text)
+
+              print("compileSdk configured to 35")
+          else:
+              print("build.gradle.kts not found; keeping project configuration")
           PY
-
-          echo "Android compileSdk configured to 35"
 
       - name: Flutter clean
         working-directory: ${{ steps.project.outputs.dir }}
@@ -92,7 +100,7 @@ jobs:
         run: |
           flutter pub get
 
-      - name: Build release APK
+      - name: Build APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter build apk --release
