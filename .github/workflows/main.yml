@@ -18,10 +18,11 @@ jobs:
 
       - name: Extract Almona project
         run: |
+          rm -rf project
           mkdir -p project
           unzip -q almona.zip -d project
 
-          echo "Extracted files:"
+          echo "Project contents:"
           find project -maxdepth 3 -type f | head -100
 
       - name: Find Flutter project
@@ -30,13 +31,13 @@ jobs:
           PUBSPEC=$(find project -name pubspec.yaml -type f | head -1)
 
           if [ -z "$PUBSPEC" ]; then
-            echo "ERROR: pubspec.yaml was not found."
+            echo "ERROR: pubspec.yaml was not found inside almona.zip"
             exit 1
           fi
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter project found at:"
+          echo "Flutter project:"
           echo "$PROJECT_DIR"
 
           echo "project_dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
@@ -51,8 +52,88 @@ jobs:
       - name: Show Flutter version
         run: flutter --version
 
-      - name: Flutter doctor
-        run: flutter doctor -v
+      - name: Enable core library desugaring
+        working-directory: ${{ steps.find_project.outputs.project_dir }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("android/app/build.gradle.kts")
+
+          if not path.exists():
+              raise SystemExit(
+                  "ERROR: android/app/build.gradle.kts was not found"
+              )
+
+          text = path.read_text()
+
+          # Enable core library desugaring
+          if "isCoreLibraryDesugaringEnabled" not in text:
+
+              if "compileOptions {" in text:
+                  start = text.index("compileOptions {")
+
+                  depth = 0
+                  end = None
+
+                  for i in range(start, len(text)):
+                      if text[i] == "{":
+                          depth += 1
+                      elif text[i] == "}":
+                          depth -= 1
+                          if depth == 0:
+                              end = i + 1
+                              break
+
+                  if end is None:
+                      raise SystemExit(
+                          "ERROR: Could not parse compileOptions block"
+                      )
+
+                  block = text[start:end]
+
+                  block = block.replace(
+                      "{",
+                      "{\n        isCoreLibraryDesugaringEnabled = true",
+                      1
+                  )
+
+                  text = text[:start] + block + text[end:]
+
+              else:
+                  raise SystemExit(
+                      "ERROR: compileOptions block was not found"
+                  )
+
+          # Add desugaring dependency
+          if "coreLibraryDesugaring(" not in text:
+
+              if "dependencies {" in text:
+                  text = text.replace(
+                      "dependencies {",
+                      """dependencies {
+    coreLibraryDesugaring(
+        "com.android.tools:desugar_jdk_libs:2.1.5"
+    )""",
+                      1
+                  )
+              else:
+                  text += """
+
+dependencies {
+    coreLibraryDesugaring(
+        "com.android.tools:desugar_jdk_libs:2.1.5"
+    )
+}
+"""
+
+          path.write_text(text)
+
+          print("Updated android/app/build.gradle.kts:")
+          print("=" * 60)
+          print(text)
+          print("=" * 60)
+          PY
 
       - name: Get dependencies
         working-directory: ${{ steps.find_project.outputs.project_dir }}
@@ -67,11 +148,14 @@ jobs:
         working-directory: ${{ steps.find_project.outputs.project_dir }}
         run: flutter build apk --release
 
-      - name: Rename APK
+      - name: Prepare APK
         working-directory: ${{ steps.find_project.outputs.project_dir }}
         run: |
           mkdir -p build/apk
           cp build/app/outputs/flutter-apk/app-release.apk build/apk/Almona.apk
+
+          echo "APK created successfully:"
+          ls -lh build/apk/Almona.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
