@@ -49,6 +49,39 @@ jobs:
           sed -i 's/intl: \^0.20.2/intl: \^0.19.0/g' pubspec.yaml
           echo "✅ Fixed intl version"
 
+      - name: Create missing app icon
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          mkdir -p android/app/src/main/res/mipmap-hdpi
+          mkdir -p android/app/src/main/res/mipmap-mdpi
+          mkdir -p android/app/src/main/res/mipmap-xhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxhdpi
+          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
+
+          for size in 72 48 96 144 192; do
+              case $size in
+                  72) folder="mipmap-hdpi" ;;
+                  48) folder="mipmap-mdpi" ;;
+                  96) folder="mipmap-xhdpi" ;;
+                  144) folder="mipmap-xxhdpi" ;;
+                  192) folder="mipmap-xxxhdpi" ;;
+              esac
+              echo "iVBORw0KGgoAAAANSUhEUgAAAEAAAABACAYAAACqaXHeAAAAAXNSR0IArs4c6QAAAARzQklUCAgICHwIZAAAAAlwSFlzAAALEwAACxMBAJqcGAAAAO1JREFUeJzt0bENg0AMheFXCoq0lBQpKKnT0FGkS0cRuQoZgSJ3RKEPPruT9C54pavM62VZRkRERERE5MOWsRzW4wMIG97HjX38tB7nnwXPhx4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEQABgB4BEADoEfD5G8YXeJQpZBnm8G4AAAAASUVORK5CYII=" | base64 -d > android/app/src/main/res/$folder/ic_launcher.png
+          done
+
+          echo "✅ Created dummy app icon"
+
+      - name: Generate Keystore for Release
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          keytool -genkey -v -keystore release.keystore \
+            -alias almona \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -storepass almona123 \
+            -keypass almona123 \
+            -dname "CN=Almona App, OU=Almona, O=Almona, L=Unknown, ST=Unknown, C=Unknown"
+          echo "✅ Generated keystore"
+
       - name: Fix Android build files
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
@@ -115,6 +148,12 @@ jobs:
               flutterVersionName = '1.0'
           }
 
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
           android {
               namespace = "com.example.almona"
               ndkVersion = "27.0.12077973"
@@ -142,9 +181,18 @@ jobs:
                   multiDexEnabled = true
               }
 
+              signingConfigs {
+                  release {
+                      keyAlias = keystoreProperties['keyAlias']
+                      keyPassword = keystoreProperties['keyPassword']
+                      storeFile = keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+                      storePassword = keystoreProperties['storePassword']
+                  }
+              }
+
               buildTypes {
                   release {
-                      signingConfig = signingConfigs.debug
+                      signingConfig = signingConfigs.release
                   }
               }
           }
@@ -156,6 +204,13 @@ jobs:
           dependencies {
               coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
           }
+          EOF
+
+          cat > android/key.properties << 'EOF'
+          storePassword=almona123
+          keyPassword=almona123
+          keyAlias=almona
+          storeFile=../release.keystore
           EOF
 
           cat > android/settings.gradle << 'EOF'
@@ -202,20 +257,20 @@ jobs:
           flutter clean
           flutter pub get
 
-      - name: Build APK
+      - name: Build Release APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          flutter build apk --debug  # ✅ تم التغيير إلى debug
+          flutter build apk --release
 
       - name: Verify APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          test -f build/app/outputs/flutter-apk/app-debug.apk
-          ls -lh build/app/outputs/flutter-apk/app-debug.apk
+          test -f build/app/outputs/flutter-apk/app-release.apk
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Almona-APK-Debug
-          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-debug.apk
+          name: Almona-APK-Release
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
