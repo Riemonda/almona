@@ -171,3 +171,15 @@ dependencies {
           name: Almona-APK
           path: ${{ steps.project.outputs.dir }}/output/Almona.apk
           if-no-files-found: error
+      - name: Prepare Almona APK
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          mkdir -p output
+          cp build/app/outputs/flutter-apk/app-release.apk output/Almona.apk
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Almona-APK
+          path: ${{ steps.project.outputs.dir }}/output/Almona.apk
+          if-no-files-found: error
