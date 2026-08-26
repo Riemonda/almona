@@ -109,10 +109,6 @@ dependencies {
 
               text = text.rstrip() + "\n" + dependency
 
-          app.write_text(text)
-
-          # --------------------------------------------------
-          # 3. Upgrade Kotlin
 name: Build Almona APK
 
 on:
