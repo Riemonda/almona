@@ -39,9 +39,16 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.0"  # ✅ تم التغيير هنا
+          flutter-version: "3.29.0"  # ✅ يستخدم Dart 3.7.0
           channel: stable
           cache: true
+
+      - name: Fix intl version in pubspec.yaml
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          # تغيير intl من ^0.20.2 إلى ^0.19.0 تلقائياً
+          sed -i 's/intl: \^0.20.2/intl: \^0.19.0/g' pubspec.yaml
+          echo "✅ Fixed intl version in pubspec.yaml"
 
       - name: Get dependencies
         working-directory: ${{ steps.project.outputs.dir }}
