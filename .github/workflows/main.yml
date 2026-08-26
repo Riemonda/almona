@@ -39,16 +39,125 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.29.0"  # ✅ يستخدم Dart 3.7.0
+          flutter-version: "3.29.0"
           channel: stable
           cache: true
 
       - name: Fix intl version in pubspec.yaml
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
-          # تغيير intl من ^0.20.2 إلى ^0.19.0 تلقائياً
           sed -i 's/intl: \^0.20.2/intl: \^0.19.0/g' pubspec.yaml
           echo "✅ Fixed intl version in pubspec.yaml"
+
+      - name: Fix Android build configuration
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          # تعديل build.gradle لإضافة NDK version و desugaring
+          ANDROID_APP_GRADLE="${{ steps.project.outputs.dir }}/android/app/build.gradle"
+          
+          if [ -f "$ANDROID_APP_GRADLE" ]; then
+            # إضافة ndkVersion إذا لم تكن موجودة
+            if ! grep -q "ndkVersion" "$ANDROID_APP_GRADLE"; then
+              sed -i '/android {/a\    ndkVersion = "27.0.12077973"' "$ANDROID_APP_GRADLE"
+            fi
+            
+            # إضافة desugaring في defaultConfig
+            if ! grep -q "multiDexEnabled" "$ANDROID_APP_GRADLE"; then
+              sed -i '/defaultConfig {/a\        multiDexEnabled true' "$ANDROID_APP_GRADLE"
+            fi
+            
+            # إضافة coreLibraryDesugaring في dependencies
+            if ! grep -q "coreLibraryDesugaring" "$ANDROID_APP_GRADLE"; then
+              sed -i '/dependencies {/a\    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"' "$ANDROID_APP_GRADLE"
+            fi
+            
+            echo "✅ Fixed Android build.gradle"
+          fi
+
+          # تعديل build.gradle.kts إذا كان موجوداً
+          ANDROID_APP_GRADLE_KTS="${{ steps.project.outputs.dir }}/android/app/build.gradle.kts"
+          if [ -f "$ANDROID_APP_GRADLE_KTS" ]; then
+            if ! grep -q "ndkVersion" "$ANDROID_APP_GRADLE_KTS"; then
+              sed -i '/android {/a\    ndkVersion = "27.0.12077973"' "$ANDROID_APP_GRADLE_KTS"
+            fi
+            echo "✅ Fixed Android build.gradle.kts"
+          fi
+
+      - name: Update Android build.gradle (manual fix)
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          cat > android/app/build.gradle << 'EOF'
+          def localProperties = new Properties()
+          def localPropertiesFile = rootProject.file('local.properties')
+          if (localPropertiesFile.exists()) {
+              localPropertiesFile.withReader('UTF-8') { reader ->
+                  localProperties.load(reader)
+              }
+          }
+
+          def flutterRoot = localProperties.getProperty('flutter.sdk')
+          if (flutterRoot == null) {
+              throw new GradleException("Flutter SDK not found. Define location with flutter.sdk in the local.properties file.")
+          }
+
+          def flutterVersionCode = localProperties.getProperty('flutter.versionCode')
+          if (flutterVersionCode == null) {
+              flutterVersionCode = '1'
+          }
+
+          def flutterVersionName = localProperties.getProperty('flutter.versionName')
+          if (flutterVersionName == null) {
+              flutterVersionName = '1.0'
+          }
+
+          apply plugin: 'com.android.application'
+          apply plugin: 'kotlin-android'
+          apply from: "$flutterRoot/packages/flutter_tools/gradle/flutter.gradle"
+
+          android {
+              ndkVersion = "27.0.12077973"
+              
+              compileSdk = 34
+
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_1_8
+                  targetCompatibility = JavaVersion.VERSION_1_8
+              }
+
+              kotlinOptions {
+                  jvmTarget = '1.8'
+              }
+
+              sourceSets {
+                  main.java.srcDirs += 'src/main/kotlin'
+              }
+
+              defaultConfig {
+                  applicationId = "com.example.almona"
+                  minSdk = 21
+                  targetSdk = 34
+                  versionCode = flutterVersionCode.toInteger()
+                  versionName = flutterVersionName
+                  multiDexEnabled = true
+              }
+
+              buildTypes {
+                  release {
+                      signingConfig = signingConfigs.debug
+                  }
+              }
+          }
+
+          flutter {
+              source = "../.."
+          }
+
+          dependencies {
+              coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"
+          }
+          EOF
+          
+          echo "✅ Replaced build.gradle with fixed version"
 
       - name: Get dependencies
         working-directory: ${{ steps.project.outputs.dir }}
