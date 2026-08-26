@@ -3,9 +3,7 @@ name: Build Almona APK
 on:
   workflow_dispatch:
   push:
-    paths:
-      - "almona.zip"
-      - ".github/workflows/main.yml"
+    branches: [ main ]
 
 jobs:
   build:
@@ -41,30 +39,9 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
-          flutter-version: "3.41.7"
+          flutter-version: "3.22.0"
           channel: stable
           cache: true
-
-      - name: Configure Android
-        working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
-        run: |
-          APP="android/app/build.gradle.kts"
-          SETTINGS="android/settings.gradle.kts"
-
-          echo "Configuring Android..."
-
-          if ! grep -q "isCoreLibraryDesugaringEnabled" "$APP"; then
-            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$APP"
-          fi
-
-          if ! grep -q "coreLibraryDesugaring(" "$APP"; then
-            printf '\ndependencies {\n    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")\n}\n' >> "$APP"
-          fi
-
-          sed -i 's/id("org.jetbrains.kotlin.android") version "1.8.22"/id("org.jetbrains.kotlin.android") version "2.1.20"/' "$SETTINGS"
-
-          echo "Android configuration completed."
 
       - name: Get dependencies
         working-directory: ${{ steps.project.outputs.dir }}
@@ -83,15 +60,9 @@ jobs:
           test -f build/app/outputs/flutter-apk/app-release.apk
           ls -lh build/app/outputs/flutter-apk/app-release.apk
 
-      - name: Prepare APK
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          mkdir -p output
-          cp build/app/outputs/flutter-apk/app-release.apk output/Almona.apk
-
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: Almona-APK
-          path: ${{ steps.project.outputs.dir }}/output/Almona.apk
+          path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
