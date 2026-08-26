@@ -34,7 +34,7 @@ jobs:
 
           PROJECT_DIR=$(dirname "$PUBSPEC")
 
-          echo "Flutter project found at: $PROJECT_DIR"
+          echo "Flutter project: $PROJECT_DIR"
           echo "dir=$PROJECT_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Setup Java
@@ -57,7 +57,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install Android SDK 35
+      - name: Install Android SDK
         run: |
           sdkmanager "platform-tools"
           sdkmanager "platforms;android-35"
@@ -67,28 +67,51 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
-      - name: Configure compileSdk 35
+      - name: Configure Android build
         working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
 
           path = Path("android/app/build.gradle.kts")
+          text = path.read_text()
 
-          if path.exists():
-              text = path.read_text()
+          # Flutter 3.41.7 + path_provider_android requires SDK 35
+          text = text.replace(
+              "compileSdk = flutter.compileSdkVersion",
+              "compileSdk = 35"
+          )
 
-              text = text.replace(
-                  "compileSdk = flutter.compileSdkVersion",
-                  "compileSdk = 35"
-              )
+          # Enable Core Library Desugaring
+          if "coreLibraryDesugaringEnabled = true" not in text:
+              marker = "compileOptions {"
 
-              path.write_text(text)
+              replacement = """compileOptions {
+                  isCoreLibraryDesugaringEnabled = true"""
 
-              print("compileSdk configured to 35")
-          else:
-              print("build.gradle.kts not found; keeping project configuration")
+              text = text.replace(marker, replacement, 1)
+
+          # Add desugaring dependency
+          dependency = 'coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")'
+
+          if "desugar_jdk_libs" not in text:
+              if "dependencies {" in text:
+                  text = text.replace(
+                      "dependencies {",
+                      "dependencies {\n    " + dependency,
+                      1
+                  )
+              else:
+                  text += "\n\ndependencies {\n    " + dependency + "\n}\n"
+
+          path.write_text(text)
+
+          print("Android configuration updated successfully.")
           PY
+
+          echo "----- build.gradle.kts -----"
+          cat android/app/build.gradle.kts
 
       - name: Flutter clean
         working-directory: ${{ steps.project.outputs.dir }}
