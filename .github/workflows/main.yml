@@ -113,26 +113,76 @@ dependencies {
 
           # --------------------------------------------------
           # 3. Upgrade Kotlin
-          # --------------------------------------------------
+name: Build Almona APK
 
-          settings_text = settings.read_text()
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "almona.zip"
+      - ".github/workflows/main.yml"
 
-          settings_text = re.sub(
-              r'(id\("org\.jetbrains\.kotlin\.android"\)\s+version\s+")[^"]+(")',
-              r'\g<1>2.1.20\g<2>',
-              settings_text
-          )
+jobs:
+  build:
+    runs-on: ubuntu-latest
 
-          settings.write_text(settings_text)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-          print("Android configuration updated successfully.")
-          print()
-          print("===== build.gradle.kts =====")
-          print(app.read_text())
-          print()
-          print("===== settings.gradle.kts =====")
-          print(settings.read_text())
-          PY
+      - name: Extract project
+        run: |
+          rm -rf project
+          mkdir project
+          unzip -q almona.zip -d project
+
+      - name: Find project
+        id: project
+        run: |
+          FILE=$(find project -name pubspec.yaml -type f | head -1)
+
+          if [ -z "$FILE" ]; then
+            echo "pubspec.yaml not found"
+            exit 1
+          fi
+
+          DIR=$(dirname "$FILE")
+
+          echo "dir=$DIR" >> "$GITHUB_OUTPUT"
+          echo "Flutter project: $DIR"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.41.7"
+          channel: stable
+          cache: true
+
+      - name: Configure Android
+        working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
+        run: |
+          APP="android/app/build.gradle.kts"
+          SETTINGS="android/settings.gradle.kts"
+
+          echo "Configuring Android..."
+
+          if ! grep -q "isCoreLibraryDesugaringEnabled" "$APP"; then
+            sed -i '/compileOptions {/a\        isCoreLibraryDesugaringEnabled = true' "$APP"
+          fi
+
+          if ! grep -q "coreLibraryDesugaring(" "$APP"; then
+            cat >> "$APP" <<'EOF'
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+}
+EOF
+          fi
+
+          sed -i 's/id("org.jetbrains.kotlin.android") version "1.8.22"/id("org.jetbrains.kotlin.android") version "2.1.20"/' "$SETTINGS"
+
+          echo "Android configuration completed."
 
       - name: Get dependencies
         working-directory: ${{ steps.project.outputs.dir }}
@@ -140,38 +190,18 @@ dependencies {
           flutter clean
           flutter pub get
 
-      - name: Build release APK
+      - name: Build APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter build apk --release
 
       - name: Verify APK
         working-directory: ${{ steps.project.outputs.dir }}
-        shell: bash
         run: |
-          APK="build/app/outputs/flutter-apk/app-release.apk"
+          test -f build/app/outputs/flutter-apk/app-release.apk
+          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
-          if [ ! -f "$APK" ]; then
-            echo "ERROR: APK was not created."
-            exit 1
-          fi
-
-          echo "APK successfully created:"
-          ls -lh "$APK"
-
-      - name: Prepare Almona APK
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          mkdir -p output
-          cp build/app/outputs/flutter-apk/app-release.apk output/Almona.apk
-
-      - name: Upload APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: Almona-APK
-          path: ${{ steps.project.outputs.dir }}/output/Almona.apk
-          if-no-files-found: error
-      - name: Prepare Almona APK
+      - name: Prepare APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           mkdir -p output
