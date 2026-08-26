@@ -43,13 +43,44 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Fix intl version in pubspec.yaml
+      - name: Fix pubspec.yaml
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
+          # إصلاح intl
           sed -i 's/intl: \^0.20.2/intl: \^0.19.0/g' pubspec.yaml
-          echo "✅ Fixed intl version"
+          
+          # إضافة flutter_launcher_icons
+          if ! grep -q "flutter_launcher_icons" pubspec.yaml; then
+            sed -i '/dev_dependencies:/a\  flutter_launcher_icons: ^0.13.1' pubspec.yaml
+          fi
+          
+          # إضافة إعدادات الأيقونة
+          cat >> pubspec.yaml << 'EOF'
 
-      - name: Generate Keystore for Release
+          flutter_launcher_icons:
+            android: true
+            ios: true
+            image_path: "assets/icon/icon.png"
+            adaptive_icon_background: "#4CAF50"
+            adaptive_icon_foreground: "assets/icon/icon.png"
+          EOF
+          
+          mkdir -p assets/icon
+          
+          # إنشاء أيقونة PNG صالحة 100%
+          cat > assets/icon/icon.png << 'EOF'
+          iVBORw0KGgoAAAANSUhEUgAAAIAAAACACAYAAADDPmHLAAAABHNCSVQICAgIfAhkiAAAAAlwSFlzAAAuIwAALiMBeKU/dgAAABl0RVh0U29mdHdhcmUAd3d3Lmlua3NjYXBlLm9yZ5vuPBoAAAJKSURBVm3d0bFNAkEUheFPAljAkoCFQglYgSVQghVoCZSgJVCClmAJVIKCqQZqWJgEhQpQHvPm7f1vN/7e7MlMZm63+yEAAAAAAAAAAAAAAAAAAAAAAEBBmrZ9y1lThqZPWmxt9xh9m379y5c0PVWx6Z5sPZO1/d/tW2KVb1yraX2Lk3M19XUL4H0rFuUVu9D4ALH9xmtBrD/wDxi7/Se+BMf2H94Ht/3H/wK37r/6Gsh7rP4HkPdY/Q8g77H6H0DeY/U/gLzH6n8AeY/V/wDyHqv/AeQ9Vv8DyHus/geQ91j9DyDvsfofQN5j9T+AvMfqfwB5j9X/APIeq/8B5D1W/wPIe6z+B5D3WP0PIO+x+h9A3mP1P4C8x+p/AHmP1f8A8h6r/wHkPVb/A8h7rP4HkPdY/Q8g77H6H0DeY/U/gLzH6n8AeY/V/wDyHqv/AeQ9Vv8DyHus/geQ91j9DyDvsfofQN5j9T+AvMfqfwB5j9X/APIeq/8B5D1W/wPIe6z+B5D3WP0PIO+x+h9A3mP1P4C8x+p/AHmP1f8A8h6r/wHkPVb/A8h7rP4HkPdY/Q8g77H6H0DeY/U/gLzH6n8AeY/V/wDyHqv/AeQ9Vv8DyHus/geQ91j9DyDvsfofQN5j9T+AvMfqfwB5j9X/APIeq/8B5D1W/wPIe6z+B5D3WP0PIO+x+h9A3mP1P4C8x+p/AHmP1f8A8h6r/wHkPVb/A8h7rP4HkPdY/Q8g77H6H0DeY/U/gLzH6n8AeY/V/wDyHqv/AeQ9Vv8DyHus/geQ91j9DyDvsfofQN5j9T+AvMfqfwB5j9X/APIeq/8BAAAAAAAAAAAAAAAAAAAAAKBQ3z8BMwJoT4Fd/AAAAABJRU5ErkJggg==
+          EOF
+          
+          echo "✅ Fixed pubspec.yaml"
+
+      - name: Generate app icon
+        working-directory: ${{ steps.project.outputs.dir }}
+        run: |
+          flutter pub get
+          flutter pub run flutter_launcher_icons
+
+      - name: Generate Keystore
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           keytool -genkey -v -keystore release.keystore \
@@ -60,60 +91,14 @@ jobs:
             -dname "CN=Almona App, OU=Almona, O=Almona, L=Unknown, ST=Unknown, C=Unknown"
           echo "✅ Generated keystore"
 
-      - name: Fix Android build files
+      - name: Create Android files
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
+          # حذف أي ملفات Gradle قديمة
           rm -f android/app/build.gradle.kts
           rm -f android/build.gradle.kts
           rm -f android/settings.gradle.kts
           
-          # إنشاء مجلدات الأيقونات
-          mkdir -p android/app/src/main/res/mipmap-hdpi
-          mkdir -p android/app/src/main/res/mipmap-mdpi
-          mkdir -p android/app/src/main/res/mipmap-xhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxhdpi
-          mkdir -p android/app/src/main/res/mipmap-xxxhdpi
-          
-          # إنشاء أيقونة بسيطة باستخدام الألوان (XML)
-          cat > android/app/src/main/res/values/ic_launcher_background.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <resources>
-              <color name="ic_launcher_background">#4CAF50</color>
-          </resources>
-          EOF
-
-          cat > android/app/src/main/res/drawable/ic_launcher_foreground.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M54,20 L74,40 L54,60 L34,40 Z"/>
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M54,48 L74,68 L54,88 L34,68 Z"/>
-          </vector>
-          EOF
-
-          # إنشاء ملفات XML للأيقونات بدلاً من PNG
-          for folder in mipmap-hdpi mipmap-mdpi mipmap-xhdpi mipmap-xxhdpi mipmap-xxxhdpi; do
-              cat > android/app/src/main/res/$folder/ic_launcher.xml << 'EOF'
-          <?xml version="1.0" encoding="utf-8"?>
-          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
-              <background android:drawable="@color/ic_launcher_background"/>
-              <foreground android:drawable="@drawable/ic_launcher_foreground"/>
-          </adaptive-icon>
-          EOF
-          done
-
-          # حذف أي ملفات PNG قديمة إذا وجدت
-          rm -f android/app/src/main/res/mipmap-*/ic_launcher.png
-
-          echo "✅ Created app icons using XML"
-
           # إنشاء android/build.gradle
           cat > android/build.gradle << 'EOF'
           buildscript {
@@ -149,6 +134,7 @@ jobs:
           }
           EOF
 
+          # إنشاء android/app/build.gradle
           cat > android/app/build.gradle << 'EOF'
           plugins {
               id "com.android.application"
@@ -232,6 +218,7 @@ jobs:
           }
           EOF
 
+          # إنشاء android/key.properties
           cat > android/key.properties << 'EOF'
           storePassword=almona123
           keyPassword=almona123
@@ -239,6 +226,7 @@ jobs:
           storeFile=../release.keystore
           EOF
 
+          # إنشاء android/settings.gradle
           cat > android/settings.gradle << 'EOF'
           pluginManagement {
               def flutterSdkPath = {
@@ -268,35 +256,25 @@ jobs:
           include ":app"
           EOF
 
+          # إنشاء android/gradle.properties
           cat > android/gradle.properties << 'EOF'
           org.gradle.jvmargs=-Xmx4G
           android.useAndroidX=true
           android.enableJetifier=true
           EOF
 
-          echo "✅ Android build files fixed"
-          ls -la android/
+          echo "✅ Created Android files"
 
-      - name: Get dependencies
+      - name: Build APK
         working-directory: ${{ steps.project.outputs.dir }}
         run: |
           flutter clean
           flutter pub get
-
-      - name: Build Release APK
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
           flutter build apk --release
-
-      - name: Verify APK
-        working-directory: ${{ steps.project.outputs.dir }}
-        run: |
-          test -f build/app/outputs/flutter-apk/app-release.apk
-          ls -lh build/app/outputs/flutter-apk/app-release.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: Almona-APK-Release
+          name: Almona-APK
           path: ${{ steps.project.outputs.dir }}/build/app/outputs/flutter-apk/app-release.apk
           if-no-files-found: error
