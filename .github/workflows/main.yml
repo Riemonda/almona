@@ -75,10 +75,11 @@ jobs:
         run: |
           python3 <<'PY'
           from pathlib import Path
+          import re
 
-          # ---------------------------------------------------------
-          # 1. app/build.gradle.kts
-          # ---------------------------------------------------------
+          # =========================================================
+          # 1. android/app/build.gradle.kts
+          # =========================================================
 
           build_file = Path("android/app/build.gradle.kts")
 
@@ -119,7 +120,7 @@ jobs:
                   text = text.replace(
                       marker,
                       """    compileOptions {
-              isCoreLibraryDesugaringEnabled = true""",
+          isCoreLibraryDesugaringEnabled = true""",
                       1
                   )
               else:
@@ -135,7 +136,6 @@ jobs:
           )
 
           if "desugar_jdk_libs" not in text:
-
               if "dependencies {" in text:
                   text = text.replace(
                       "dependencies {",
@@ -151,9 +151,9 @@ jobs:
 
           build_file.write_text(text)
 
-          # ---------------------------------------------------------
-          # 2. settings.gradle.kts
-          # ---------------------------------------------------------
+          # =========================================================
+          # 2. android/settings.gradle.kts
+          # =========================================================
 
           settings_file = Path("android/settings.gradle.kts")
 
@@ -164,7 +164,6 @@ jobs:
 
           settings = settings_file.read_text()
 
-          # Flutter 3.41.7 requires a modern Kotlin version.
           settings = settings.replace(
               'id("org.jetbrains.kotlin.android") version "1.8.22" apply false',
               'id("org.jetbrains.kotlin.android") version "2.1.0" apply false'
@@ -172,57 +171,87 @@ jobs:
 
           settings_file.write_text(settings)
 
-          # ---------------------------------------------------------
-          # 3. Android launcher icon
-          # ---------------------------------------------------------
+          # =========================================================
+          # 3. Find Almona logo
+          # =========================================================
 
-          drawable_dir = Path(
-              "android/app/src/main/res/drawable"
+          logo = Path("assets/images/almona.png")
+
+          if not logo.exists():
+              raise SystemExit(
+                  "ERROR: assets/images/almona.png was not found."
+              )
+
+          print("Almona logo found:")
+          print(logo)
+
+          # =========================================================
+          # 4. Remove old manually-created launcher icon
+          # =========================================================
+
+          old_icon = Path(
+              "android/app/src/main/res/drawable/ic_launcher.xml"
           )
 
-          drawable_dir.mkdir(parents=True, exist_ok=True)
+          if old_icon.exists():
+              old_icon.unlink()
+              print("Removed old ic_launcher.xml")
 
-          icon_file = drawable_dir / "ic_launcher.xml"
+          # =========================================================
+          # 5. Prepare Android mipmap directories
+          # =========================================================
 
-          icon_file.write_text("""<?xml version="1.0" encoding="utf-8"?>
-          <vector xmlns:android="http://schemas.android.com/apk/res/android"
-              android:width="108dp"
-              android:height="108dp"
-              android:viewportWidth="108"
-              android:viewportHeight="108">
+          densities = {
+              "mdpi": 48,
+              "hdpi": 72,
+              "xhdpi": 96,
+              "xxhdpi": 144,
+              "xxxhdpi": 192,
+          }
 
-              <path
-                  android:fillColor="#4CAF50"
-                  android:pathData="M0,0 L108,0 L108,108 L0,108 Z" />
+          res_dir = Path("android/app/src/main/res")
 
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M54,18
-                  C34.12,18 18,34.12 18,54
-                  C18,73.88 34.12,90 54,90
-                  C73.88,90 90,73.88 90,54
-                  C90,34.12 73.88,18 54,18 Z
+          for density, size in densities.items():
+              directory = res_dir / f"mipmap-{density}"
+              directory.mkdir(parents=True, exist_ok=True)
 
-                  M54,28
-                  C68.36,28 80,39.64 80,54
-                  C80,68.36 68.36,80 54,80
-                  C39.64,80 28,68.36 28,54
-                  C28,39.64 39.64,28 54,28 Z" />
+          # =========================================================
+          # 6. Generate launcher PNGs from almona.png
+          # =========================================================
 
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M48,38 L60,38 L60,70 L48,70 Z" />
+          print("Generating Android launcher icons...")
 
-              <path
-                  android:fillColor="#FFFFFF"
-                  android:pathData="M38,48 L70,48 L70,60 L38,60 Z" />
+          for density, size in densities.items():
+              directory = res_dir / f"mipmap-{density}"
 
-          </vector>
-          """)
+              icon = directory / "ic_launcher.png"
 
-          # ---------------------------------------------------------
-          # 4. Fix AndroidManifest icon
-          # ---------------------------------------------------------
+              import subprocess
+
+              subprocess.run(
+                  [
+                      "convert",
+                      str(logo),
+                      "-resize",
+                      f"{size}x{size}",
+                      "-background",
+                      "none",
+                      "-gravity",
+                      "center",
+                      "-extent",
+                      f"{size}x{size}",
+                      str(icon),
+                  ],
+                  check=True,
+              )
+
+              print(
+                  f"Created {icon} ({size}x{size})"
+              )
+
+          # =========================================================
+          # 7. Update AndroidManifest.xml
+          # =========================================================
 
           manifest = Path(
               "android/app/src/main/AndroidManifest.xml"
@@ -236,34 +265,78 @@ jobs:
           manifest_text = manifest.read_text()
 
           manifest_text = manifest_text.replace(
-              'android:icon="@mipmap/ic_launcher"',
-              'android:icon="@drawable/ic_launcher"'
+              'android:icon="@drawable/ic_launcher"',
+              'android:icon="@mipmap/ic_launcher"'
           )
 
+          if 'android:icon="@mipmap/ic_launcher"' not in manifest_text:
+              if "<application" in manifest_text:
+                  manifest_text = manifest_text.replace(
+                      "<application",
+                      '<application android:icon="@mipmap/ic_launcher"',
+                      1
+                  )
+              else:
+                  raise SystemExit(
+                      "ERROR: application tag not found."
+                  )
+
           manifest.write_text(manifest_text)
+
+          print("AndroidManifest.xml updated.")
+
+          # =========================================================
+          # 8. Remove obsolete drawable launcher files
+          # =========================================================
+
+          for file in [
+              Path("android/app/src/main/res/drawable/ic_launcher.png"),
+              Path("android/app/src/main/res/drawable/ic_launcher.xml"),
+          ]:
+              if file.exists():
+                  file.unlink()
 
           print("Android configuration completed successfully.")
           PY
 
       - name: Verify Android configuration
         working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
           echo "========================================"
           echo "Android build configuration"
           echo "========================================"
 
+          echo ""
+          echo "compileSdk:"
           grep -n "compileSdk" android/app/build.gradle.kts || true
+
+          echo ""
+          echo "Java / Desugaring:"
           grep -n "isCoreLibraryDesugaringEnabled" android/app/build.gradle.kts || true
           grep -n "desugar_jdk_libs" android/app/build.gradle.kts || true
+
+          echo ""
+          echo "Kotlin:"
           grep -n "kotlin.android" android/settings.gradle.kts || true
+
+          echo ""
+          echo "Manifest icon:"
           grep -n "android:icon" android/app/src/main/AndroidManifest.xml || true
 
           echo ""
-          echo "Checking launcher icon..."
+          echo "Checking Almona launcher icons..."
 
-          test -f android/app/src/main/res/drawable/ic_launcher.xml
+          test -f assets/images/almona.png
 
-          echo "Launcher icon exists."
+          test -f android/app/src/main/res/mipmap-mdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-hdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-xhdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
+          test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
+
+          echo ""
+          echo "Almona launcher icons exist successfully."
 
       - name: Flutter clean
         working-directory: ${{ steps.project.outputs.dir }}
@@ -282,6 +355,7 @@ jobs:
 
       - name: Verify APK
         working-directory: ${{ steps.project.outputs.dir }}
+        shell: bash
         run: |
           APK="build/app/outputs/flutter-apk/app-release.apk"
 
@@ -294,6 +368,7 @@ jobs:
           echo "========================================"
           echo "APK BUILD SUCCESSFUL"
           echo "========================================"
+
           ls -lh "$APK"
 
       - name: Upload APK
