@@ -84,7 +84,7 @@ jobs:
           import subprocess
 
           # =========================================================
-          # 1. android/app/build.gradle.kts
+          # 1. Android build configuration
           # =========================================================
 
           build_file = Path("android/app/build.gradle.kts")
@@ -118,7 +118,10 @@ jobs:
               "jvmTarget = JavaVersion.VERSION_17.toString()"
           )
 
+          # =========================================================
           # Core Library Desugaring
+          # =========================================================
+
           if "isCoreLibraryDesugaringEnabled = true" not in text:
               marker = "    compileOptions {"
 
@@ -134,7 +137,6 @@ jobs:
                       "ERROR: compileOptions block not found"
                   )
 
-          # Desugaring dependency
           dependency = (
               '    coreLibraryDesugaring('
               '"com.android.tools:desugar_jdk_libs:2.1.5"'
@@ -158,7 +160,7 @@ jobs:
           build_file.write_text(text)
 
           # =========================================================
-          # 2. android/settings.gradle.kts
+          # 2. Kotlin
           # =========================================================
 
           settings_file = Path("android/settings.gradle.kts")
@@ -178,7 +180,7 @@ jobs:
           settings_file.write_text(settings)
 
           # =========================================================
-          # 3. Find Almona logo
+          # 3. Almona logo
           # =========================================================
 
           logo = Path("assets/images/almona.png")
@@ -192,19 +194,21 @@ jobs:
           print(logo)
 
           # =========================================================
-          # 4. Remove old manually-created launcher icon
+          # 4. Remove old launcher files
           # =========================================================
 
-          old_icon = Path(
-              "android/app/src/main/res/drawable/ic_launcher.xml"
-          )
+          old_files = [
+              Path("android/app/src/main/res/drawable/ic_launcher.xml"),
+              Path("android/app/src/main/res/drawable/ic_launcher.png"),
+          ]
 
-          if old_icon.exists():
-              old_icon.unlink()
-              print("Removed old ic_launcher.xml")
+          for old_file in old_files:
+              if old_file.exists():
+                  old_file.unlink()
+                  print(f"Removed {old_file}")
 
           # =========================================================
-          # 5. Prepare Android mipmap directories
+          # 5. Android launcher icon sizes
           # =========================================================
 
           densities = {
@@ -217,28 +221,33 @@ jobs:
 
           res_dir = Path("android/app/src/main/res")
 
-          for density in densities:
-              directory = res_dir / f"mipmap-{density}"
-              directory.mkdir(parents=True, exist_ok=True)
-
           # =========================================================
-          # 6. Generate launcher PNGs from almona.png
+          # 6. Create normal Android launcher icons
+          #
+          # The logo keeps its original proportions.
+          # No aggressive trimming.
+          # No white background is added.
+          # The logo occupies approximately 72% of the icon area.
           # =========================================================
 
-          print("Generating Android launcher icons...")
+          print("Generating normal Almona launcher icons...")
 
           for density, size in densities.items():
               directory = res_dir / f"mipmap-{density}"
+              directory.mkdir(parents=True, exist_ok=True)
+
               icon = directory / "ic_launcher.png"
+
+              logo_size = int(size * 0.72)
 
               subprocess.run(
                   [
                       "convert",
                       str(logo),
-                      "-resize",
-                      f"{size}x{size}",
                       "-background",
                       "none",
+                      "-resize",
+                      f"{logo_size}x{logo_size}",
                       "-gravity",
                       "center",
                       "-extent",
@@ -286,17 +295,7 @@ jobs:
 
           manifest.write_text(manifest_text)
 
-          # =========================================================
-          # 8. Remove obsolete drawable launcher files
-          # =========================================================
-
-          for file in [
-              Path("android/app/src/main/res/drawable/ic_launcher.png"),
-              Path("android/app/src/main/res/drawable/ic_launcher.xml"),
-          ]:
-              if file.exists():
-                  file.unlink()
-
+          print("AndroidManifest.xml updated.")
           print("Android configuration completed successfully.")
           PY
 
@@ -326,9 +325,14 @@ jobs:
           grep -n "android:icon" android/app/src/main/AndroidManifest.xml || true
 
           echo ""
-          echo "Checking Almona launcher icons..."
+          echo "Checking Almona logo..."
 
           test -f assets/images/almona.png
+
+          echo "Almona logo exists."
+
+          echo ""
+          echo "Checking launcher icons..."
 
           test -f android/app/src/main/res/mipmap-mdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-hdpi/ic_launcher.png
@@ -337,7 +341,7 @@ jobs:
           test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
           echo ""
-          echo "Almona launcher icons exist successfully."
+          echo "All launcher icons exist successfully."
 
       - name: Flutter clean
         working-directory: ${{ steps.project.outputs.dir }}
