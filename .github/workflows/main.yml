@@ -119,7 +119,7 @@ jobs:
           )
 
           # =========================================================
-          # Core Library Desugaring
+          # 2. Core Library Desugaring
           # =========================================================
 
           if "isCoreLibraryDesugaringEnabled = true" not in text:
@@ -160,7 +160,7 @@ jobs:
           build_file.write_text(text)
 
           # =========================================================
-          # 2. Kotlin
+          # 3. Kotlin
           # =========================================================
 
           settings_file = Path("android/settings.gradle.kts")
@@ -180,7 +180,7 @@ jobs:
           settings_file.write_text(settings)
 
           # =========================================================
-          # 3. Almona logo
+          # 4. Check Almona logo
           # =========================================================
 
           logo = Path("assets/images/almona.png")
@@ -194,12 +194,14 @@ jobs:
           print(logo)
 
           # =========================================================
-          # 4. Remove old launcher files
+          # 5. Remove old launcher resources
           # =========================================================
 
+          res_dir = Path("android/app/src/main/res")
+
           old_files = [
-              Path("android/app/src/main/res/drawable/ic_launcher.xml"),
-              Path("android/app/src/main/res/drawable/ic_launcher.png"),
+              res_dir / "drawable" / "ic_launcher.xml",
+              res_dir / "drawable" / "ic_launcher.png",
           ]
 
           for old_file in old_files:
@@ -208,7 +210,115 @@ jobs:
                   print(f"Removed {old_file}")
 
           # =========================================================
-          # 5. Android launcher icon sizes
+          # 6. Create Adaptive Icon directories
+          # =========================================================
+
+          adaptive_dir = res_dir / "mipmap-anydpi-v26"
+          adaptive_dir.mkdir(parents=True, exist_ok=True)
+
+          drawable_dir = res_dir / "drawable"
+          drawable_dir.mkdir(parents=True, exist_ok=True)
+
+          # =========================================================
+          # 7. Create Adaptive Icon foreground
+          #
+          # 108x108 canvas
+          # Almona logo enlarged to approximately 90%
+          # Transparent outside the logo
+          # =========================================================
+
+          foreground = drawable_dir / "ic_launcher_foreground.png"
+
+          subprocess.run(
+              [
+                  "convert",
+                  str(logo),
+                  "-background",
+                  "none",
+                  "-resize",
+                  "97x97",
+                  "-gravity",
+                  "center",
+                  "-extent",
+                  "108x108",
+                  str(foreground),
+              ],
+              check=True,
+          )
+
+          print(
+              "Created Adaptive Icon foreground:",
+              foreground
+          )
+
+          # =========================================================
+          # 8. Create Adaptive Icon XML
+          #
+          # Android 8+ / Android 13
+          # Background uses Almona green.
+          # Foreground uses the real Almona logo.
+          # =========================================================
+
+          adaptive_icon = adaptive_dir / "ic_launcher.xml"
+
+          adaptive_icon.write_text(
+              """<?xml version="1.0" encoding="utf-8"?>
+          <adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+              <background android:drawable="@color/almona_icon_background" />
+              <foreground android:drawable="@drawable/ic_launcher_foreground" />
+          </adaptive-icon>
+          """
+          )
+
+          print(
+              "Created Adaptive Icon:",
+              adaptive_icon
+          )
+
+          # =========================================================
+          # 9. Create launcher background color
+          # =========================================================
+
+          values_dir = res_dir / "values"
+          values_dir.mkdir(parents=True, exist_ok=True)
+
+          colors_file = values_dir / "colors.xml"
+
+          existing_colors = ""
+
+          if colors_file.exists():
+              existing_colors = colors_file.read_text()
+
+          if "almona_icon_background" not in existing_colors:
+
+              if "<resources>" in existing_colors:
+
+                  existing_colors = existing_colors.replace(
+                      "<resources>",
+                      """<resources>
+              <color name="almona_icon_background">#00C896</color>""",
+                      1
+                  )
+
+                  colors_file.write_text(existing_colors)
+
+              else:
+
+                  colors_file.write_text(
+                      """<?xml version="1.0" encoding="utf-8"?>
+          <resources>
+              <color name="almona_icon_background">#00C896</color>
+          </resources>
+          """
+                  )
+
+          print("Adaptive Icon background configured.")
+
+          # =========================================================
+          # 10. Legacy launcher icons
+          #
+          # Used by older Android versions.
+          # The same Almona logo is used.
           # =========================================================
 
           densities = {
@@ -219,26 +329,16 @@ jobs:
               "xxxhdpi": 192,
           }
 
-          res_dir = Path("android/app/src/main/res")
-
-          # =========================================================
-          # 6. Create normal Android launcher icons
-          #
-          # The logo keeps its original proportions.
-          # No aggressive trimming.
-          # No white background is added.
-          # The logo occupies approximately 72% of the icon area.
-          # =========================================================
-
-          print("Generating normal Almona launcher icons...")
+          print("Generating legacy launcher icons...")
 
           for density, size in densities.items():
+
               directory = res_dir / f"mipmap-{density}"
               directory.mkdir(parents=True, exist_ok=True)
 
               icon = directory / "ic_launcher.png"
 
-              logo_size = int(size * 0.72)
+              logo_size = int(size * 0.90)
 
               subprocess.run(
                   [
@@ -258,11 +358,11 @@ jobs:
               )
 
               print(
-                  f"Created {icon} ({size}x{size})"
+                  f"Created legacy icon: {icon}"
               )
 
           # =========================================================
-          # 7. Update AndroidManifest.xml
+          # 11. Update AndroidManifest.xml
           # =========================================================
 
           manifest = Path(
@@ -276,27 +376,35 @@ jobs:
 
           manifest_text = manifest.read_text()
 
+          # Remove previous icon declarations if present.
           manifest_text = manifest_text.replace(
               'android:icon="@drawable/ic_launcher"',
-              'android:icon="@mipmap/ic_launcher"'
+              ''
           )
 
-          if 'android:icon="@mipmap/ic_launcher"' not in manifest_text:
-              if "<application" in manifest_text:
-                  manifest_text = manifest_text.replace(
-                      "<application",
-                      '<application android:icon="@mipmap/ic_launcher"',
-                      1
-                  )
-              else:
-                  raise SystemExit(
-                      "ERROR: application tag not found."
-                  )
+          manifest_text = manifest_text.replace(
+              'android:icon="@mipmap/ic_launcher"',
+              ''
+          )
+
+          # Add Adaptive Icon launcher reference.
+          if "<application" in manifest_text:
+
+              manifest_text = manifest_text.replace(
+                  "<application",
+                  '<application android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher"',
+                  1
+              )
+
+          else:
+              raise SystemExit(
+                  "ERROR: application tag not found."
+              )
 
           manifest.write_text(manifest_text)
 
           print("AndroidManifest.xml updated.")
-          print("Android configuration completed successfully.")
+          print("Adaptive Icon configuration completed successfully.")
           PY
 
       - name: Verify Android configuration
@@ -304,7 +412,7 @@ jobs:
         shell: bash
         run: |
           echo "========================================"
-          echo "Android build configuration"
+          echo "Android configuration verification"
           echo "========================================"
 
           echo ""
@@ -321,18 +429,23 @@ jobs:
           grep -n "kotlin.android" android/settings.gradle.kts || true
 
           echo ""
-          echo "Manifest icon:"
+          echo "Manifest:"
           grep -n "android:icon" android/app/src/main/AndroidManifest.xml || true
+          grep -n "android:roundIcon" android/app/src/main/AndroidManifest.xml || true
 
           echo ""
-          echo "Checking Almona logo..."
+          echo "Adaptive Icon:"
+          test -f android/app/src/main/res/mipmap-anydpi-v26/ic_launcher.xml
+          test -f android/app/src/main/res/drawable/ic_launcher_foreground.png
 
-          test -f assets/images/almona.png
-
-          echo "Almona logo exists."
+          echo "Adaptive Icon files exist."
 
           echo ""
-          echo "Checking launcher icons..."
+          echo "Launcher background:"
+          grep -n "almona_icon_background" android/app/src/main/res/values/colors.xml || true
+
+          echo ""
+          echo "Legacy icons:"
 
           test -f android/app/src/main/res/mipmap-mdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-hdpi/ic_launcher.png
@@ -340,8 +453,13 @@ jobs:
           test -f android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png
           test -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
+          echo "All launcher icons exist."
+
           echo ""
-          echo "All launcher icons exist successfully."
+          echo "Almona logo:"
+          test -f assets/images/almona.png
+
+          echo "Almona logo exists."
 
       - name: Flutter clean
         working-directory: ${{ steps.project.outputs.dir }}
