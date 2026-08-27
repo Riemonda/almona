@@ -69,13 +69,19 @@ jobs:
         run: |
           yes | sdkmanager --licenses || true
 
+      - name: Install image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+          convert --version
+
       - name: Configure Android project
         working-directory: ${{ steps.project.outputs.dir }}
         shell: bash
         run: |
           python3 <<'PY'
           from pathlib import Path
-          import re
+          import subprocess
 
           # =========================================================
           # 1. android/app/build.gradle.kts
@@ -211,7 +217,7 @@ jobs:
 
           res_dir = Path("android/app/src/main/res")
 
-          for density, size in densities.items():
+          for density in densities:
               directory = res_dir / f"mipmap-{density}"
               directory.mkdir(parents=True, exist_ok=True)
 
@@ -223,10 +229,7 @@ jobs:
 
           for density, size in densities.items():
               directory = res_dir / f"mipmap-{density}"
-
               icon = directory / "ic_launcher.png"
-
-              import subprocess
 
               subprocess.run(
                   [
@@ -282,8 +285,6 @@ jobs:
                   )
 
           manifest.write_text(manifest_text)
-
-          print("AndroidManifest.xml updated.")
 
           # =========================================================
           # 8. Remove obsolete drawable launcher files
